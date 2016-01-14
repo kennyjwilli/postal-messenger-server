@@ -8,7 +8,6 @@
             [clojure.edn :as edn]
             [amazonica.aws.sns :as sns]
             [amazonica.aws.sqs :as sqs]
-            [cheshire.core :refer [generate-string]]
             [buddy.sign.jws :as jws]
             [postal.server.jwt :as jwt]
             [postal.server.util :as u]

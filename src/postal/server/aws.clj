@@ -1,4 +1,5 @@
-(ns postal.server.aws)
+(ns postal.server.aws
+  (:require [cheshire.core :refer [generate-string]]))
 
 (defn arn-for
   [service name & {:keys [region id] :or {region "us-east-1"
