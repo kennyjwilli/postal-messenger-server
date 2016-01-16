@@ -4,7 +4,7 @@
             [catacumba.handlers.auth :as auth]
             [catacumba.handlers.postal :as pc]
             [catacumba.handlers.postal :as pc]
-            [clojure.core.async :refer [<! >! chan put! timeout go go-loop close!]]
+            [clojure.core.async :refer [<! >! alts! chan put! timeout go go-loop close!] :as a]
             [clojure.edn :as edn]
             [amazonica.aws.sns :as sns]
             [amazonica.aws.sqs :as sqs]
@@ -15,8 +15,11 @@
             [pro.stormpath.auth :as sa]
             [pro.stormpath.account :as acc]
             [catacumba.core :as ct]
+            [clj-uuid :as uuid]
+            [cheshire.core :refer [parse-string]]
             [postal.server.aws :as aws])
   (:import (ratpack.http TypedData)
+
            (ratpack.handling Context)))
 
 ;;===================================
@@ -80,22 +83,76 @@
           (success-fn decoded)))
       (error-fn "No token"))))
 
+(defn random-queue-name-for
+  [username]
+  (str (u/alpha-numberic username) "-" (uuid/v1)))
+
+(defn sqs-queue-for!
+  [username sns-arn]
+  (let [queue-name (random-queue-name-for username)]
+    (sqs/create-queue :queue-name queue-name
+                      :attributes {:Policy (aws/allow-sns-push-to-sqs-policy (aws/sqs-arn queue-name) sns-arn)})))
+
+(defn sqs-message-chan
+  ([url timeout]
+   (let [chan (chan 10)]
+     (go-loop []
+       (when (<! chan)
+         (let [messages (:messages (sqs/receive-message :queue-url url
+                                                        :max-number-of-messages 1
+                                                        :delete true))]
+           (when-not (empty? messages)
+             (doseq [msg messages]
+               (>! chan (parse-string (:body msg) true)))))
+         (<! (a/timeout timeout))
+         (recur)))
+     chan))
+  ([url] (sqs-message-chan url 500)))
+
 (defmethod postal-handler {:type :socket
                            :dest :messages}
   [ctx frame]
-  ;; TODO: Error handling is a little funky
-  (ws-auth
-    frame
-    (fn [identity]
-      (letfn [(on-connect [{:keys [in out] :as context}]
-                (println "connect")
-                (sns/subscribe :topic-arn (:topic-arn identity))
+  (letfn [(on-connect [{:keys [in out ctrl] :as context}]
+            (println "connect")
+            (ws-auth
+              frame
+              (fn [identity]
+                (let [topic-arn (:topic-arn identity)
+                      queue-url (-> identity :username (sqs-queue-for! topic-arn) :queue-url) ;TODO: Normalize identity
+                      queue-arn (-> queue-url sqs/get-queue-attributes :QueueArn)
+                      sqs-chan (sqs-message-chan queue-url)]
+                  (println "CREATE SQS" queue-arn)
+                  (sns/subscribe :topic-arn topic-arn
+                                 :protocol "sqs"
+                                 :endpoint queue-arn)
+                  (println "SUBSCRIBED")
+                  (go-loop []
+                    (let [[v p] (alts! [ctrl in sqs-chan])]
+                      (cond
+                        ;; RECEIVE
+                        (= p in)
+                        (do
+                          (println "IN" v)
+                          (when (= (:data v) "close")
+                            (println "closed")
+                            (close! out))
+                          (recur))
+
+                        ;; RECEIVE FROM SQS
+                        (= p sqs-chan)
+                        (do
+                          (println "SQS" v)
+                          (recur))
+
+                        ;; CLOSE
+                        (= p ctrl)
+                        (do
+                          (println "Channel closed")
+                          (sqs/delete-queue queue-url))))))
                 (go
-                  (>! out (pc/frame {:value "test"})))
-                (go-loop []
-                  (when-let [value (<! in)]
-                    (println "IN" value)
-                    (recur))))]
-        (pc/socket ctx on-connect)))
-    (fn [err-msg]
-      (http/unauthorized err-msg))))
+                  (>! out (pc/frame {:value "test"}))))
+              (fn [err-msg]
+                (go
+                  (>! out (pc/frame {:value "Unauthorized"}))
+                  (close! out)))))]
+    (pc/socket ctx on-connect)))
