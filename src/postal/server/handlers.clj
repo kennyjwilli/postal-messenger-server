@@ -6,38 +6,35 @@
             [catacumba.handlers.postal :as pc]
             [clojure.core.async :refer [<! >! alts! chan put! timeout go go-loop close!] :as async]
             [clojure.edn :as edn]
-            [pubnub :as p]
             [buddy.sign.jws :as jws]
             [postal.server.jwt :as jwt]
             [postal.server.util :as u]
             [pro.stormpath.core :as sp]
             [pro.stormpath.auth :as sa]
             [pro.stormpath.account :as acc]
+            [pusher.core :as p]
             [catacumba.core :as ct]
-            [cheshire.core :refer [parse-string]])
+            [cheshire.core :refer [parse-string generate-string]])
   (:import (ratpack.http TypedData)
            (ratpack.handling Context)))
 
 ;;===================================
 ;; INIT
 ;;===================================
+(def pusher-creds {:app-id     (System/getenv "APP_ID")
+                   :api-key    (System/getenv "API_KEY")
+                   :api-secret (System/getenv "API_SECRET")})
+
 (defonce api-key (sp/build-api-key sp/path))
 (defonce client (sp/build-client api-key))
 (defonce tenant (sp/get-tenant client))
 (defonce application (sp/get-tenant-application tenant "Postal Messenger"))
 
+(defonce pusher (p/pusher pusher-creds))
+
 (def ^:private secret (System/getenv "JWT_RSA_PRV_PASS"))
 (def auth-backend
   (auth/jws-backend {:secret secret}))
-
-;;TODO: Replace with SQS
-(def message-relay (chan 100))
-
-(def creds {:access-key (System/getenv "AWS_ACCESS_KEY_ID")
-            :secret-key (System/getenv "AWS_SECRET_ACCESS_KEY")})
-
-(def pubnub-creds {:subscribe-key (System/getenv "SUBSCRIBE_KEY")
-                   :publish-key   (System/getenv "PUBLISH_KEY")})
 
 ;;===================================
 ;; PARSING
@@ -61,6 +58,10 @@
     (ct/delegate)
     (http/found "You need to login")))
 
+(defn channel-name-for
+  [username]
+  (str "private-message-" username))
+
 (defn login-handler
   [ctx]
   (let [params (:data ctx)
@@ -70,9 +71,28 @@
         account (:account auth-result)]
     (if (:success auth-result)
       ;; TODO: Should use JWE?
-      (http/ok (jwt/sign {:username username
-                          :roles    (acc/get-group-names account)} secret))
+      (http/ok (jwt/sign {:username        username
+                          :message-channel (channel-name-for username)
+                          :roles           (acc/get-group-names account)} secret))
       (http/unauthorized "Incorrect login"))))
+
+(defn pusher-auth
+  "Authorizes a user to subscribe to a specific pusher message channel"
+  [ctx]
+  (let [data (:data ctx)
+        message-channel (get-in ctx [:identity :message-channel])]
+    (if (= message-channel (:channel_name data))
+      (http/ok (p/authenticate pusher (:socket_id data) (:channel_name data)))
+      (http/unauthorized (str "You do not have permission to subscribe to " (:channel_name data))))))
+
+(defn get-pusher
+  [ctx]
+  (let [identity (:identity ctx)]
+    (if identity
+      (http/ok (generate-string {:message-channel (:message-channel identity)
+                                 :api-key         (:api-key pusher-creds)})
+               {"Content-Type" "application/json"})
+      (http/unauthorized "Not authorized"))))
 
 (defmulti postal-handler
           (fn [ctx frame] (select-keys frame [:type :dest])))
@@ -87,10 +107,6 @@
           (success-fn decoded)))
       (error-fn "No token"))))
 
-(defn- channel-for
-  [user]
-  (-> {:channel user} (merge pubnub-creds) p/channel))
-
 (defn- send-message
   [ch msg]
   (go (>! ch (pc/frame {:value msg}))))
@@ -104,10 +120,9 @@
             (ws-auth
               frame
               (fn [identity]
-                (let [channel (channel-for (:username identity))
-                      subscription (p/subscribe channel)]
+                (let []
                   (go-loop []
-                    (let [[v p] (alts! [ctrl in subscription])]
+                    (let [[v p] (alts! [ctrl in])]
                       (cond
                         ;; RECEIVE FROM CLIENT
                         (= p in)
@@ -116,14 +131,6 @@
                           (when (= (:data v) "close")
                             (println "closed")
                             (close! out))
-                          (recur))
-
-                        ;; RECIEVE FROM PUBNUB
-                        (= p subscription)
-                        (do
-                          (println "v" v)
-                          (when (= (:status v) :success)
-                            (send-message out (:payload v)))
                           (recur))
 
                         ;; CLOSE

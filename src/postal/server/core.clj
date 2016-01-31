@@ -5,7 +5,8 @@
             [catacumba.handlers.parse :as parsing]
             [catacumba.handlers.postal :as pc]
             [postal.server.handlers :as handlers]
-            [postal.server.util :as u])
+            [postal.server.util :as u]
+            [catacumba.http :as http])
   (:gen-class))
 
 
@@ -19,7 +20,10 @@
      [:assets "" {:dir     "target"
                   :indexes ["index.html"]}]
      [:post "login" #'handlers/login-handler]
-     [:post "foo" (fn [ctx] (println (:identity ctx)))]
+     [:post "foo" (fn [ctx] (println (:identity ctx)) (http/ok "cool"))]
+     [:prefix "api"
+      [:get "pusher" #'handlers/get-pusher]
+      [:post "pusher-auth" #'handlers/pusher-auth]]
      [:any "postal" (pc/router #'handlers/postal-handler)]]))
 
 (comment
