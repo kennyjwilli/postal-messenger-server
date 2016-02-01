@@ -23,7 +23,8 @@
      [:post "foo" (fn [ctx] (println (:identity ctx)) (http/ok "cool"))]
      [:prefix "api"
       [:get "pusher" #'handlers/get-pusher]
-      [:post "pusher-auth" #'handlers/pusher-auth]]
+      [:post "pusher-auth" #'handlers/pusher-auth]
+      [:post "message" #'handlers/post-message]]
      [:any "postal" (pc/router #'handlers/postal-handler)]]))
 
 (comment

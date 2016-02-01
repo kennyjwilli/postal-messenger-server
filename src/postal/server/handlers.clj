@@ -94,6 +94,14 @@
                {"Content-Type" "application/json"})
       (http/unauthorized "Not authorized"))))
 
+(defn post-message
+  [ctx]
+  (let [data (:data ctx)
+        identity (:identity ctx)]
+    (if identity
+      (p/push! pusher (:message-channel identity) "messages" data)
+      (http/unauthorized "Not authorized"))))
+
 (defmulti postal-handler
           (fn [ctx frame] (select-keys frame [:type :dest])))
 
