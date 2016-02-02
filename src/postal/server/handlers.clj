@@ -99,7 +99,9 @@
   (let [data (:data ctx)
         identity (:identity ctx)]
     (if identity
-      (p/push! pusher (:message-channel identity) "messages" data)
+      (do
+        (p/push! pusher (:message-channel identity) "messages" data)
+        (http/ok "Sent message"))
       (http/unauthorized "Not authorized"))))
 
 (defmulti postal-handler
