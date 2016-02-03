@@ -89,9 +89,11 @@
   [ctx]
   (let [identity (:identity ctx)]
     (if identity
-      (http/ok (generate-string {:message-channel (:message-channel identity)
-                                 :api-key         (:api-key pusher-creds)})
-               {"Content-Type" "application/json"})
+      (do
+        (println "GET PUSHER" identity)
+        (http/ok (generate-string {:message-channel (:message-channel identity)
+                                   :api-key         (:api-key pusher-creds)})
+                 {"Content-Type" "application/json"}))
       (http/unauthorized "Not authorized"))))
 
 (defn post-message
@@ -100,7 +102,8 @@
         identity (:identity ctx)]
     (if identity
       (do
-        (p/push! pusher (:message-channel identity) "messages" data)
+        (println "PUSHED" data)
+        (p/push! pusher (:message-channel identity) "messages" data (:socket_id data))
         (http/ok "Sent message"))
       (http/unauthorized "Not authorized"))))
 
