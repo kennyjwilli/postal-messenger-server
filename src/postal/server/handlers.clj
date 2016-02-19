@@ -5,6 +5,7 @@
             [catacumba.handlers.postal :as pc]
             [catacumba.handlers.postal :as pc]
             [clojure.core.async :refer [<! >! alts! chan put! timeout go go-loop close!] :as async]
+            [clojure.walk :as walk]
             [clojure.edn :as edn]
             [buddy.sign.jws :as jws]
             [postal.server.jwt :as jwt]
@@ -103,8 +104,9 @@
     (if identity
       (do
         (println "PUSHED" data)
-        (p/push! pusher (:message-channel identity) "messages" data (:socket_id data))
-        (http/ok "Sent message"))
+        (p/push! pusher (:message-channel identity) "messages" (walk/stringify-keys data) (:socket_id data))
+        (http/ok (generate-string {:message "Pushed message!"})
+                 {"Content-Type" "application/json"}))
       (http/unauthorized "Not authorized"))))
 
 (defmulti postal-handler
