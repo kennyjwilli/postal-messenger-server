@@ -102,11 +102,15 @@
   (let [data (:data ctx)
         identity (:identity ctx)]
     (if identity
-      (do
-        (println "PUSHED" data)
-        (p/push! pusher (:message-channel identity) "messages" (walk/stringify-keys data) (:socket_id data))
-        (http/ok (generate-string {:message "Pushed message!"})
-                 {"Content-Type" "application/json"}))
+      (let [resp (p/push! pusher (:message-channel identity) "messages" (walk/stringify-keys data) (:socket_id data))]
+        (if (= (:status resp) 200)
+          (do
+            (println "PUSHED" data)
+            (http/ok (generate-string {:message "Pushed message!"})
+                     {"Content-Type" "application/json"}))
+          (do
+            (println "FAILED PUSH " (:message resp))
+            (http/response (:message resp) (:status resp)))))
       (http/unauthorized "Not authorized"))))
 
 (defmulti postal-handler
