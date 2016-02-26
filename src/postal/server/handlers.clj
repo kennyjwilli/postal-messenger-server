@@ -102,7 +102,7 @@
   (let [data (:data ctx)
         identity (:identity ctx)]
     (if identity
-      (let [resp (p/push! pusher (:message-channel identity) "messages" (walk/stringify-keys data) (:socket_id data))]
+      (let [resp (p/push! pusher (:message-channel identity) "messages" (walk/stringify-keys (:body data)) (:socket_id data))]
         (if (= (:status resp) 200)
           (do
             (println "PUSHED" data)
