@@ -1,3 +1,6 @@
+(def project 'postal/server)
+(def version "0.1.0-SNAPSHOT")
+
 (set-env!
   :resource-paths #{"src" "resources"}
   :dependencies '[[provisdom/boot-tasks "0.6.0" :scope "test" :exclusions [commons-codec]]
@@ -19,3 +22,10 @@
 
 (require
   '[provisdom.boot-tasks.core :refer :all])
+
+(task-options!
+  pom {:project     project
+       :version     version
+       :description "The Postal Messenger server"
+       :url         "https://github.com/kennyjwilli/postal-messenger-server"
+       :license     {"Eclipse Public License" "http://www.eclipse.org/legal/epl-v10.html"}})
