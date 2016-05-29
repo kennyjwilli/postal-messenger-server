@@ -27,7 +27,6 @@
       [:post "message" #'handlers/post-message]]]))
 
 (comment
-  ;;; TODO - put in -main
   (def srvr (ct/run-server routes {:basedir u/basedir
                                    :debug   true
                                    :port    8080}))

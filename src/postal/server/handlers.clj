@@ -28,7 +28,7 @@
 (defonce client (sp/client {:id (e/env :stormpath-id) :secret (e/env :stormpath-secret)}))
 (defonce application (sp/application client (e/env :stormpath-app-name)))
 
-(defonce pusher (p/pusher pusher-creds))
+(defonce pusher (p/pusher pusher-creds true))
 
 (def ^:private secret (e/env :jwt-secret))
 (def auth-backend
