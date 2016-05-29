@@ -10,14 +10,15 @@
                   [funcool/catacumba "0.16.0"]
                   [funcool/promesa "1.2.0"]
                   [funcool/httpurr "0.6.0"]
-                  [buddy/buddy-sign "0.9.0"]
+                  [buddy/buddy-sign "1.0.0"]
                   [clj-time "0.11.0"]
                   [danlentz/clj-uuid "0.1.6"]
                   [cheshire "5.6.1" :exclusions [com.fasterxml.jackson.core/jackson-core]]
                   [com.cemerick/url "0.1.1"]
                   [provisdom/stormpath "0.2.0" :exclusions [org.slf4j/slf4j-log4j12
                                                             log4j/log4j]]
-                  [pusher "0.1.1"]])
+                  [pusher "0.1.1"]
+                  [environ "1.0.3"]])
 
 (require
   '[provisdom.boot-tasks.core :refer :all])

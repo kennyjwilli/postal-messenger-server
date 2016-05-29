@@ -1,39 +1,36 @@
 (ns postal.server.handlers
-  (:require [catacumba.http :as http]
+  (:require [catacumba.core :as ct]
+            [catacumba.http :as http]
             [catacumba.handlers.parse :as parsing]
             [catacumba.handlers.auth :as auth]
-            [catacumba.handlers.postal :as pc]
             [catacumba.handlers.postal :as pc]
             [clojure.core.async :refer [<! >! alts! chan put! timeout go go-loop close!] :as async]
             [clojure.walk :as walk]
             [clojure.edn :as edn]
-            [buddy.sign.jws :as jws]
-            [postal.server.jwt :as jwt]
-            [postal.server.util :as u]
-            [pro.stormpath.core :as sp]
-            [pro.stormpath.auth :as sa]
-            [pro.stormpath.account :as acc]
+            [buddy.sign.jwt :as jwt]
             [pusher.core :as p]
-            [catacumba.core :as ct]
-            [cheshire.core :refer [parse-string generate-string]])
+            [cheshire.core :as json]
+            [environ.core :as e]
+            [provisdom.stormpath.core :as sp]
+            [provisdom.stormpath.auth :as sa]
+            [provisdom.stormpath.account :as acc]
+            [postal.server.util :as u])
   (:import (ratpack.http TypedData)
            (ratpack.handling Context)))
 
 ;;===================================
 ;; INIT
 ;;===================================
-(def pusher-creds {:app-id     (System/getenv "APP_ID")
-                   :api-key    (System/getenv "API_KEY")
-                   :api-secret (System/getenv "API_SECRET")})
+(def pusher-creds {:app-id     (e/env :pusher-app-id)
+                   :api-key    (e/env :pusher-key)
+                   :api-secret (e/env :pusher-secret)})
 
-(defonce api-key (sp/build-api-key sp/path))
-(defonce client (sp/build-client api-key))
-(defonce tenant (sp/get-tenant client))
-(defonce application (sp/get-tenant-application tenant "Postal Messenger"))
+(defonce client (sp/client {:id (e/env :stormpath-id) :secret (e/env :stormpath-secret)}))
+(defonce application (sp/application client (e/env :stormpath-app-name)))
 
 (defonce pusher (p/pusher pusher-creds))
 
-(def ^:private secret (System/getenv "JWT_RSA_PRV_PASS"))
+(def ^:private secret (e/env :jwt-secret))
 (def auth-backend
   (auth/jws-backend {:secret secret}))
 
@@ -71,10 +68,10 @@
         auth-result (sa/do-auth application username password)
         account (:account auth-result)]
     (if (:success auth-result)
-      ;; TODO: Should use JWE?
-      (http/ok (jwt/sign {:username        username
-                          :message-channel (channel-name-for username)
-                          :roles           (acc/get-group-names account)} secret))
+      (http/ok (json/encode
+                 {:token (jwt/sign {:username        username
+                                    :message-channel (channel-name-for username)
+                                    :roles           (acc/get-group-names account)} secret)}))
       (http/unauthorized "Incorrect login"))))
 
 (defn pusher-auth
@@ -92,8 +89,8 @@
     (if identity
       (do
         (println "GET PUSHER" identity)
-        (http/ok (generate-string {:message-channel (:message-channel identity)
-                                   :api-key         (:api-key pusher-creds)})
+        (http/ok (json/encode {:message-channel (:message-channel identity)
+                               :api-key         (:api-key pusher-creds)})
                  {"Content-Type" "application/json"}))
       (http/unauthorized "Not authorized"))))
 
@@ -106,61 +103,9 @@
         (if (= (:status resp) 200)
           (do
             (println "PUSHED" data)
-            (http/ok (generate-string {:message "Pushed message!"})
+            (http/ok (json/encode {:message "Pushed message!"})
                      {"Content-Type" "application/json"}))
           (do
             (println "FAILED PUSH " (:message resp))
             (http/response (:message resp) (:status resp)))))
       (http/unauthorized "Not authorized"))))
-
-(defmulti postal-handler
-          (fn [ctx frame] (select-keys frame [:type :dest])))
-
-(defn ws-auth
-  [frame success-fn error-fn]
-  (let [jwt (get-in frame [:data :token])]
-    (if jwt
-      (let [decoded (jws/unsign jwt secret)]
-        (if (jwt/expired? decoded)
-          (error-fn "Expired token")
-          (success-fn decoded)))
-      (error-fn "No token"))))
-
-(defn- send-message
-  [ch msg]
-  (go (>! ch (pc/frame {:value msg}))))
-
-(defmethod postal-handler {:type :socket
-                           :dest :messages}
-  [ctx frame]
-  (letfn [(on-connect [{:keys [in out ctrl] :as context}]
-            (println "connect")
-            ;; TODO: Make all async
-            (ws-auth
-              frame
-              (fn [identity]
-                (let []
-                  (go-loop []
-                    (let [[v p] (alts! [ctrl in])]
-                      (cond
-                        ;; RECEIVE FROM CLIENT
-                        (= p in)
-                        (do
-                          (println "IN" v)
-                          (when (= (:data v) "close")
-                            (println "closed")
-                            (close! out))
-                          (recur))
-
-                        ;; CLOSE
-                        (= p ctrl)
-                        (do
-                          (println "Channel closed")
-                          #_(sqs/delete-queue queue-url))))))
-                (go
-                  (>! out (pc/frame {:value "test"}))))
-              (fn [err-msg]
-                (go
-                  (>! out (pc/frame {:value "Unauthorized"}))
-                  (close! out)))))]
-    (pc/socket ctx on-connect)))
