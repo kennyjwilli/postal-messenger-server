@@ -99,13 +99,15 @@
   (let [data (:data ctx)
         identity (:identity ctx)]
     (if identity
-      (let [resp (p/push! pusher (:message-channel identity) "messages" (walk/stringify-keys (:body data)) (:socket_id data))]
-        (if (= (:status resp) 200)
-          (do
-            (println "PUSHED" data)
-            (http/ok (json/encode {:message "Pushed message!"})
-                     {"Content-Type" "application/json"}))
-          (do
-            (println "FAILED PUSH " (:message resp))
-            (http/response (:message resp) (:status resp)))))
+      (if (:body data)
+        (let [resp (p/push! pusher (:message-channel identity) "messages" (walk/stringify-keys (:body data)) (:socket_id data))]
+          (if (= (:status resp) 200)
+            (do
+              (println "PUSHED" data)
+              (http/ok (json/encode {:message "Pushed message!"})
+                       {"Content-Type" "application/json"}))
+            (do
+              (println "FAILED PUSH " (:message resp))
+              (http/response (:message resp) (:status resp)))))
+        (http/bad-request (str "Bad message: " data)))
       (http/unauthorized "Not authorized"))))
